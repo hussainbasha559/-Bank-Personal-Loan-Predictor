@@ -1,24 +1,44 @@
 # Multi-page Streamlit App
-# Pages: Home | Dashboard | Prediction | Data View
+import sys
+import os
+
+# Force fresh imports - must be BEFORE any src imports
+sys.dont_write_bytecode = True
+for mod in ['src.predictor', 'src.agent', 'predictor', 'agent']:
+    if mod in sys.modules:
+        del sys.modules[mod]
 
 import streamlit as st
 import pandas as pd
 import sqlite3
-import requests
-import joblib
-import os
+import shap
+import matplotlib.pyplot as plt
+import pickle
+
+from src.predictor import predict, explainer  # ← explainer imported here
+from src.agent import loan_agent
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_PATH = os.path.join(CURRENT_DIR, "..", "src")
+
+
+
 
 st.set_page_config(page_title="Bank Loan App", page_icon="🏦", layout="centered")
 
 # ── Load data ──────────────────────────────────────────────────
 BASE = os.path.dirname(os.path.dirname(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+feature_names = pickle.load(open(os.path.join(BASE_DIR, "../models/feature_names.pkl"), "rb"))
 
 @st.cache_data
 def load_data():
     # conn = sqlite3.connect(os.path.join(BASE, "data/bank_loan.db"))
     DB_PATH = os.path.join(os.path.dirname(__file__), "../data/bank_loan.db")
-    df = pd.read_sql("SELECT * FROM clean_data", DB_PATH)
-    DB_PATH.close()
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM clean_data", conn)
+    conn.close()
     return df
 
 df = load_data()
@@ -133,9 +153,10 @@ elif page == "📊 Dashboard":
 # ══════════════════════════════════════════════════════════════
 # PAGE 3: PREDICTION
 # ══════════════════════════════════════════════════════════════
+
 elif page == "🔍 Prediction":
-    st.title("🔍 Loan Eligibility Prediction")
-    st.write("Fill in the customer details and click Predict.")
+    st.title("🏦 Loan Approval AI System")
+    st.write("Enter applicant details below:")
     st.divider()
 
     col1, col2 = st.columns(2)
@@ -147,33 +168,87 @@ elif page == "🔍 Prediction":
         # ccavg      = st.number_input("Monthly CC Spend ($K)",      min_value=0.0, max_value=10.0, value=1.0, step=0.1)
 
     with col2:
-        education  = st.selectbox("Education", [1, 2, 3],
-                                   format_func=lambda x: {1:"Undergrad", 2:"Graduate", 3:"Advanced"}[x])
+        education_map = {"UG": 1, "Graduate": 2, "Advanced": 3}
+        education_label = st.selectbox("Education", list(education_map.keys()))
+        education = education_map[education_label]
         mortgage   = st.number_input("Mortgage Amount ($K)",       min_value=0, max_value=700, value=0)
         # sec_acc    = st.selectbox("Securities Account?", [0, 1],   format_func=lambda x: "Yes" if x else "No")
         cd_acc     = st.selectbox("CD Account?",         [0, 1],   format_func=lambda x: "Yes" if x else "No")
-        # online     = st.selectbox("Online Banking?",     [0, 1],   format_func=lambda x: "Yes" if x else "No")
-        # credit_card = st.selectbox("Credit Card with Bank?", [0, 1], format_func=lambda x: "Yes" if x else "No")
-
     st.divider()
+    
     if st.button("🔍 Predict Loan Eligibility", use_container_width=True):
-        payload = {
-            "Age": age, "Experience": experience, "Income": income,
-            "Family": family,  "Education": education,
-            "Mortgage": mortgage, 
-            "CD_Account": cd_acc, 
+
+        st.info("🤖 AI Agent is analyzing your profile...")
+
+        data = {
+            "Age": age,
+            "Experience": experience,
+            "Income": income,
+            "Family": family,
+            "Education": education,
+            "Mortgage": mortgage,
+            "CD Account": cd_acc
         }
-        API_URL = os.getenv("API_URL", "http://localhost:8000/predict")
-        res = requests.post(API_URL, json=payload)
-        try:
-            r   = res.json()
-            if r["prediction"] == 1:
-                st.success(f"### {r['result']}")
-            else:
-                st.error(f"### {r['result']}")
-            st.write(f"**Confidence:** {r['confidence']}")
-        except Exception as e:
-            st.error(f"API Error: {e}")
+        st.write("DEBUG DATA:", data)  
+        result = loan_agent(data)
+
+        st.divider()
+
+        st.subheader("📊 Decision")
+        if "Approved" in result["decision"]:
+            st.success(result["decision"])
+        else:
+            st.error(result["decision"])
+
+        st.subheader("📈 Confidence")
+        st.write(f"{result['confidence']}%")
+
+        st.subheader("🧠 Insights")
+        for i in result["insights"]:
+            st.write("•", i)
+
+        st.subheader("💡 Suggestions")
+        if result["suggestions"]:
+            for s in result["suggestions"]:
+                st.write("•", s)
+        else:
+            st.write("No suggestions needed 👍")
+
+        shap_values = result["shap_values"]
+        data_array = result["data_array"]
+
+        st.write("### Explanation:")
+
+        fig, ax = plt.subplots()
+        shap.plots.waterfall(
+            shap.Explanation(
+                values=shap_values,           # now 1D, 7 values
+                base_values=explainer.expected_value[1],  # class-1 base value
+                data=data_array[0],
+                feature_names=["Age","Experience","Income","Family","Education","Mortgage","CD Account"]
+            ),
+            show=False
+        )
+        st.pyplot(fig)
+    # if st.button("🔍 Predict Loan Eligibility", use_container_width=True):
+    #     payload = {
+    #         "Age": age, "Experience": experience, "Income": income,
+    #         "Family": family,  "Education": education,
+    #         "Mortgage": mortgage, 
+    #         "CD_Account": cd_acc, 
+    #     }
+    #     # API_URL = os.getenv("API_URL", "https://mini-project-yyii.onrender.com/predict")
+    #     # res = requests.post(API_URL, json=payload)
+    #     try:
+    #         r   = res.json()
+    #         st.write("API says:", r) 
+    #         if r["prediction"] == 1:
+    #             st.success(f"### {r['result']}")
+    #         else:
+    #             st.error(f"### {r['result']}")
+    #         st.write(f"**Confidence:** {r['confidence']}")
+    #     except Exception as e:
+    #         st.error(f"API Error: {e}")
 
 # ══════════════════════════════════════════════════════════════
 # PAGE 4: DATA VIEW
