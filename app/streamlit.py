@@ -1,6 +1,8 @@
 # Multi-page Streamlit App
 import sys
 import os
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
 
 # Force fresh imports - must be BEFORE any src imports
 sys.dont_write_bytecode = True
@@ -230,25 +232,6 @@ elif page == "🔍 Prediction":
             show=False
         )
         st.pyplot(fig)
-    # if st.button("🔍 Predict Loan Eligibility", use_container_width=True):
-    #     payload = {
-    #         "Age": age, "Experience": experience, "Income": income,
-    #         "Family": family,  "Education": education,
-    #         "Mortgage": mortgage, 
-    #         "CD_Account": cd_acc, 
-    #     }
-    #     # API_URL = os.getenv("API_URL", "https://mini-project-yyii.onrender.com/predict")
-    #     # res = requests.post(API_URL, json=payload)
-    #     try:
-    #         r   = res.json()
-    #         st.write("API says:", r) 
-    #         if r["prediction"] == 1:
-    #             st.success(f"### {r['result']}")
-    #         else:
-    #             st.error(f"### {r['result']}")
-    #         st.write(f"**Confidence:** {r['confidence']}")
-    #     except Exception as e:
-    #         st.error(f"API Error: {e}")
 
 # ══════════════════════════════════════════════════════════════
 # PAGE 4: DATA VIEW
